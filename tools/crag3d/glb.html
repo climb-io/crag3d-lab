@@ -1,0 +1,52 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>大砲岩 3D</title>
+<style>html,body{margin:0;height:100%;background:#eef2f5;overflow:hidden}#i{position:fixed;left:8px;bottom:8px;font:12px system-ui;color:#0B4A6B}</style>
+<div id="i"></div>
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+const r=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true});r.setPixelRatio(devicePixelRatio);r.setSize(innerWidth,innerHeight);r.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(r.domElement);
+const s=new THREE.Scene();s.background=new THREE.Color(0xeef2f5);
+const c=new THREE.PerspectiveCamera(50,innerWidth/innerHeight,0.05,2000);const o=new OrbitControls(c,r.domElement);
+const files=(new URLSearchParams(location.search).get('m')||'test-wall.glb').split(',');
+const L=new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);const box=new THREE.Box3();let n=0;
+for(const f of files){const g=await L.loadAsync(f);g.scene.traverse(x=>{if(x.isMesh){x.material=new THREE.MeshBasicMaterial({map:x.material.map,side:THREE.DoubleSide,vertexColors:!!x.geometry.attributes.color,alphaTest:0.5})}});s.add(g.scene);box.expandByObject(g.scene);n++}
+const ctr=box.getCenter(new THREE.Vector3()),sz=box.getSize(new THREE.Vector3());o.target.copy(ctr);
+c.position.copy(ctr).add(new THREE.Vector3(0,sz.y*0.3,Math.max(sz.x,sz.z)*1.1));o.update();
+const rf=new URLSearchParams(location.search).get('routes');
+if(rf){const COL={Red:0xd7263d,Green:0x2a9d4b,Yellow:0xf2c200,Orange:0xf28c28,Purple:0x7b3fa0,White:0xffffff};
+ const RS=(await (await fetch(rf)).json()).filter(r=>r.points);window.routes=RS;
+ for(const r of RS){
+  const pts=r.points.map(p=>new THREE.Vector3(...p)),cv=new THREE.CatmullRomCurve3(pts);
+  const tube=new THREE.Mesh(new THREE.TubeGeometry(cv,Math.max(16,pts.length*2),0.05,6,false),new THREE.MeshBasicMaterial({color:COL[r.color]||0xd7263d,depthTest:false,transparent:true,opacity:0.9}));
+  tube.renderOrder=2;s.add(tube);
+  const cvs=Object.assign(document.createElement('canvas'),{width:128,height:64}),g=cvs.getContext('2d');g.fillStyle='#0B4A6B';g.beginPath();g.roundRect(4,4,120,56,28);g.fill();g.fillStyle='#fff';g.font='bold 36px system-ui';g.textAlign='center';g.textBaseline='middle';g.fillText(r.number,64,34);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cvs),depthTest:false}));sp.scale.set(0.8,0.4,1);sp.position.copy(pts.reduce((a,b)=>a.y>b.y?a:b)).add(new THREE.Vector3(0,0.4,0));sp.renderOrder=3;s.add(sp)}}
+const at=new URLSearchParams(location.search).get('at');
+if(at){const v=(await (await fetch(`groups/${at}/wall.json`)).json()).views;const m=v.map(x=>x.at).reduce((a,b)=>a.map((y,i)=>y+b[i]/v.length),[0,0,0]);
+ const x=v.reduce((a,b)=>Math.hypot(...b.at.map((y,i)=>y-m[i]))<Math.hypot(...a.at.map((y,i)=>y-m[i]))?b:a);   // 站在離拍照點中心最近的那台相機
+ c.position.set(...x.at);o.target.set(...x.at.map((y,i)=>y+x.dir[i]*4));o.update()}
+const rt=new URLSearchParams(location.search).get('route');   // 從這條路線照片的拍攝位置打開
+if(rt&&window.routes){const r=window.routes.find(x=>x.number===rt);if(r){const p=r.points;c.position.set(...r.camera);o.target.set(...p.reduce((a,b)=>a.map((y,i)=>y+b[i]/p.length),[0,0,0]));o.update()}}
+const wf=new URLSearchParams(location.search).get('walls');   // 岩面：上方標名稱，點名稱就從岩壁下看整面牆
+const wallTags=[];
+function lookAt(w){
+ const C=new THREE.Vector3(...w.center),S=new THREE.Vector3(...w.standAt),out=S.clone().sub(C);out.y=0;out.normalize();
+ const span=Math.max(w.max[0]-w.min[0],w.max[2]-w.min[2],1),h=w.max[1]-w.min[1];   // 往後退到整面牆塞得進畫面（直拿手機，看寬度）
+ const hf=2*Math.atan(Math.tan(THREE.MathUtils.degToRad(c.fov)/2)*c.aspect),d=Math.max(span*0.6/Math.tan(hf/2),h*0.6/Math.tan(THREE.MathUtils.degToRad(c.fov)/2));
+ c.position.copy(C).addScaledVector(out,d);c.position.y=S.y;o.target.copy(C);o.update()}
+if(wf){for(const w of (await (await fetch(wf)).json()).filter(w=>w.center)){
+  const cvs=Object.assign(document.createElement('canvas'),{width:320,height:96}),g=cvs.getContext('2d');g.font='bold 52px system-ui';
+  const tw=Math.min(300,g.measureText(w.name).width+56);g.fillStyle='#fff';g.beginPath();g.roundRect((320-tw)/2,8,tw,80,40);g.fill();g.fillStyle='#0B4A6B';g.textAlign='center';g.textBaseline='middle';g.fillText(w.name,160,50);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cvs),depthTest:false}));sp.scale.set(2.4,0.72,1);sp.position.set(...w.top);sp.renderOrder=4;sp.userData.wall=w;s.add(sp);wallTags.push(sp)}
+ const ray=new THREE.Raycaster();let down=null;
+ r.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);
+ r.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>6)return;
+  ray.setFromCamera(new THREE.Vector2(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1),c);const h=ray.intersectObjects(wallTags)[0];if(h)lookAt(h.object.userData.wall)});
+ const wn=new URLSearchParams(location.search).get('wall');const w0=wallTags.find(t=>t.userData.wall.name===wn);if(w0)lookAt(w0.userData.wall)}
+window.lookAt=lookAt;window.wallTags=wallTags;
+document.getElementById('i').textContent=`${n} 個模型 · ${sz.x.toFixed(1)}×${sz.y.toFixed(1)}×${sz.z.toFixed(1)} m`;window.ready=true;window.c=c;window.o=o;
+(function a(){requestAnimationFrame(a);r.render(s,c)})();
+</script>

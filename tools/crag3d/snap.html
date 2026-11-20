@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-Hant">
+<!-- 戶外 3D Topo：每面岩壁從 3D 模型拍一張正面快照（岩場頁的卡片、2D Topo），並把路線投到快照上；另外拍一張全區俯視（overview.jpg，岩場的封面），
+     鏡頭存在 overview.json（紅點貓 3D 打開時從這裡飛進各區）。
+     ?pack=<crag_pack 的 crag.json>（views=<JSON> 時改成照清單拍參考圖）&model=<GLB 或高斯潑濺 .spz>&w=1080&h=1440&fov=50（垂直視角）；結果 POST 到 snap_server.py：wall-<序號>.jpg、snaps.json、overview.jpg、overview.json -->
+<meta charset="utf-8"><title>快照</title>
+<body style="margin:0;background:#000">
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+const { SparkRenderer, SplatMesh } = await import('https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.4.0/dist/spark.module.js');
+
+const q = new URLSearchParams(location.search), W = +(q.get('w') ?? 1080), H = +(q.get('h') ?? 1440), FOV = +(q.get('fov') ?? 50), SKY = 0xdfe6ec, NEAR = +(q.get('near') ?? 3), OV_YAW = THREE.MathUtils.degToRad(+(q.get('ovYaw') ?? 15)), OV_PITCH = THREE.MathUtils.degToRad(+(q.get('ovPitch') ?? 20)), YAW = THREE.MathUtils.degToRad(+(q.get('yaw') ?? 0)), PAD = +(q.get('pad') ?? 1.2), OW = +(q.get('ovW') ?? W), OH = +(q.get('ovH') ?? H), OFOV = +(q.get('ovFov') ?? FOV), OV_ONLY = q.has('ovOnly'), OV_FIT = +(q.get('ovFit') ?? 0.94), OV_LIFT = +(q.get('ovLift') ?? 0);   // ovFit：路線最外側到畫面邊緣的比例（小一點：四周多留）；ovLift：看的中心往上移幾公尺（模型前方的地面裁掉了，畫面下緣才不會露出空白）   // near=999：不裁前景，看紅點貓打開 3D 時真的看到的；pad：岩壁左右多留幾公尺（描路線時拍寬一點，整面岩壁都看得到）
+const pack = await (await fetch(q.get('pack'))).json();
+const r = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+r.setSize(W, H); r.outputColorSpace = THREE.SRGBColorSpace; document.body.append(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(SKY);
+const splat = /\.spz$/.test(q.get('model')) || !!q.get('bg');   // bg=：岩壁用網格時的潑濺背景（紅點貓的 props.background）
+if (splat) scene.add(new SparkRenderer({ renderer: r }));
+for (const u of [q.get('model'), q.get('bg')].filter((x) => x && /\.spz$/.test(x))) {   // 高斯潑濺：排序在背景做，畫幾十格等它排好再拍
+  const m = new SplatMesh({ url: u });
+  scene.add(m); await m.initialized;
+}
+if (!/\.spz$/.test(q.get('model'))) {
+  const gltf = await new GLTFLoader().loadAsync(q.get('model'));
+  gltf.scene.traverse((x) => { if (x.isMesh) x.material = new THREE.MeshBasicMaterial({ map: x.material.map, side: THREE.DoubleSide, vertexColors: !!x.geometry.attributes.color, alphaTest: 0.5 }) });
+  scene.add(gltf.scene);
+}
+const shoot = async () => { for (let i = 0; i < (splat ? 50 : 1); i++) { r.render(scene, cam); if (splat) await new Promise((ok) => setTimeout(ok, 50)); } };   // 背景分頁的計時器會被節流：用 snap.mjs 的無頭瀏覽器跑
+const cam = new THREE.PerspectiveCamera(FOV, W / H, 0.05, 2000);
+
+// 從岩面正前方往後退到整面岩壁（含路線）塞得進畫面，相機高度在站位眼睛的高度與岩壁中央之間
+function frame(w, pts) {
+  const C = new THREE.Vector3(...w.center), out = w.facing ? new THREE.Vector3(...w.facing) : new THREE.Vector3(...w.standAt).sub(C); out.y = 0; out.normalize();   // 岩面朝向（walls.py）
+  const side = new THREE.Vector3(-out.z, 0, out.x);
+  const xs = pts.map((p) => new THREE.Vector3(...p).sub(C).dot(side)), ys = pts.map((p) => p[1]);
+  const half = (Math.max(...xs) - Math.min(...xs)) / 2 + PAD, top = Math.max(...ys) + 0.8, bot = Math.min(...ys) - 1.0;
+  const mid = new THREE.Vector3().copy(C).addScaledVector(side, (Math.max(...xs) + Math.min(...xs)) / 2); mid.y = (top + bot) / 2;
+  const vf = THREE.MathUtils.degToRad(FOV), hf = 2 * Math.atan(Math.tan(vf / 2) * W / H);
+  const vfit = Math.min(vf, 2 * Math.atan(Math.tan(hf / 2) / 0.75));   // 岩壁塞進中間 3:4 的範圍（快照比 3:4 高時上下多留，電腦上打開也看得到整面岩壁）
+  const d = Math.max(half / Math.tan(hf / 2), (top - bot) / 2 / Math.tan(vfit / 2), 5);
+  cam.position.copy(mid).addScaledVector(out.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), YAW), d); cam.position.y = Math.max(w.standAt[1] + 1.6, mid.y - d * 0.15);   // yaw：繞岩壁中央轉幾度斜著看（檢查用）
+  if (w.view) {   // clearance.py：鏡頭前面有東西擋著的區，繞看的中心轉 yaw 度、離中心的距離乘 scale（跟 clearance.py 的 move 同一個算法）
+    const a = THREE.MathUtils.degToRad(w.view.yaw), v = cam.position.clone().sub(mid);
+    cam.position.copy(mid).add(new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), v.y, -v.x * Math.sin(a) + v.z * Math.cos(a)).multiplyScalar(w.view.scale));
+  }
+  cam.near = Math.max(0.05, d - NEAR); cam.updateProjectionMatrix();   // 岩面前方 NEAR 公尺以外的前景（樹叢）不畫，免得擋住路線
+  cam.lookAt(mid); cam.updateMatrixWorld();
+  return mid;
+}
+// 投到畫面像素；只留畫面內、相機前的點，再化簡（誤差 2 px）
+const px = (p) => { const v = new THREE.Vector3(...p).project(cam); return v.z < 1 ? [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H] : null; };
+function simplify(a, tol) {
+  if (a.length < 3) return a;
+  const [x0, y0] = a[0], [x1, y1] = a[a.length - 1], L = Math.hypot(x1 - x0, y1 - y0) || 1;
+  let k = 0, m = 0;
+  for (let i = 1; i < a.length - 1; i++) { const d = Math.abs((x1 - x0) * (y0 - a[i][1]) - (x0 - a[i][0]) * (y1 - y0)) / L; if (d > m) { m = d; k = i; } }
+  return m <= tol ? [a[0], a[a.length - 1]] : [...simplify(a.slice(0, k + 1), tol).slice(0, -1), ...simplify(a.slice(k), tol)];
+}
+const save = (name, body) => fetch(`/save/${name}`, { method: 'POST', body });
+// views=<JSON>：照清單拍參考圖（舊照片對位用，photo_pose.py）：[{ position, target, fov, w, h, file }]，拍完就停
+if (q.get('views')) {
+  for (const v of await (await fetch(q.get('views'))).json()) {
+    r.setSize(v.w, v.h); cam.aspect = v.w / v.h; cam.fov = v.fov; cam.near = 0.05;
+    cam.position.set(...v.position); cam.lookAt(new THREE.Vector3(...v.target)); cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+    await shoot();
+    await save(v.file, await new Promise((ok) => r.domElement.toBlob(ok, 'image/jpeg', 0.9)));
+  }
+  document.title = '完成';
+  await new Promise(() => {});
+}
+const snaps = [];
+for (const [i, w] of OV_ONLY ? [] : pack.walls.entries()) {   // ovOnly：只重拍全區俯視（各區快照留著）
+  if (q.get('wall') && w.name !== q.get('wall')) continue;   // wall=：只拍這一區（描路線時找角度用）
+  const mine = pack.routes.filter((rt) => +rt.number >= w.routes[0] && +rt.number <= w.routes[1]);
+  if (!mine.length) continue;
+  const target = frame(w, mine.flatMap((rt) => rt.points));
+  await shoot();
+  await save(`wall-${i}.jpg`, await new Promise((ok) => r.domElement.toBlob(ok, 'image/jpeg', 0.85)));
+  const routes = mine.map((rt) => ({ number: rt.number, line: simplify(rt.points.map(px).filter((p) => p && p[0] >= 0 && p[0] <= W && p[1] >= 0 && p[1] <= H), 2).map(([x, y]) => [Math.round(x * 10) / 10, Math.round(y * 10) / 10]) }));
+  snaps.push({ wall: w.name, file: `wall-${i}.jpg`, w: W, h: H, camera: { position: cam.position.toArray().map((v) => +v.toFixed(3)), target: target.toArray().map((v) => +v.toFixed(3)), fov: FOV }, routes });
+}
+if (!OV_ONLY) await save('snaps.json', JSON.stringify(snaps));
+// 全區俯視（紅點貓的岩場封面、第一次進 3D 的第一個畫面；ovW、ovH、ovFov：它自己的大小和垂直視角，跟卡片同比例）：從岩壁正前方稍微偏向編號小的那一端（OV_YAW）、稍微往下看（OV_PITCH），整段岩壁都看得到正面，往後退到全部路線都在畫面裡
+{
+  r.setSize(OW, OH); cam.aspect = OW / OH; cam.fov = OFOV;
+  const all = pack.walls.flatMap((w) => pack.routes.filter((rt) => +rt.number >= w.routes[0] && +rt.number <= w.routes[1])).flatMap((rt) => rt.points);
+  const C = all.reduce((a, p) => a.add(new THREE.Vector3(...p)), new THREE.Vector3()).divideScalar(all.length);
+  const first = pack.walls[0], last = pack.walls[pack.walls.length - 1];
+  const along = new THREE.Vector3(...last.center).sub(new THREE.Vector3(...first.center)); along.y = 0; along.normalize();   // 從第一區往最後一區
+  let out = new THREE.Vector3(-along.z, 0, along.x);
+  if (out.dot(new THREE.Vector3(...first.standAt).sub(new THREE.Vector3(...first.center))) < 0) out.negate();
+  const dir = out.clone().multiplyScalar(Math.cos(OV_YAW)).addScaledVector(along, -Math.sin(OV_YAW)).multiplyScalar(Math.cos(OV_PITCH)).add(new THREE.Vector3(0, Math.sin(OV_PITCH), 0));
+  const fits = (d) => {
+    cam.position.copy(C).addScaledVector(dir, d); cam.lookAt(C); cam.near = 0.05; cam.updateProjectionMatrix(); cam.updateMatrixWorld();
+    return all.every((p) => { const v = new THREE.Vector3(...p).project(cam); return v.z < 1 && Math.abs(v.x) < OV_FIT && Math.abs(v.y) < 0.85; });
+  };
+  let d = 10;
+  while (!fits(d) && d < 500) d *= 1.05;
+  C.y += OV_LIFT; fits(d);
+  await shoot();
+  await save('overview.jpg', await new Promise((ok) => r.domElement.toBlob(ok, 'image/jpeg', 0.85)));
+  await save('overview.json', JSON.stringify({ file: 'overview.jpg', w: OW, h: OH, camera: { position: cam.position.toArray().map((v) => +v.toFixed(3)), target: C.toArray().map((v) => +v.toFixed(3)), fov: OFOV } }));
+}
+document.title = '完成';
+</script>

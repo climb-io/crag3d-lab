@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#eef2f5">
+<title>3D Topo</title>
+<style>
+:root{--ink:#0B4A6B;--bg:#eef2f5;--card:#fff}
+html,body{margin:0;height:100%;background:var(--bg);overflow:hidden;font-family:system-ui,-apple-system,"PingFang TC",sans-serif;color:var(--ink);-webkit-user-select:none;user-select:none;touch-action:none}
+canvas{display:block}
+#top{position:fixed;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 10px) 16px 8px;display:flex;align-items:baseline;gap:8px;pointer-events:none}
+#top b{font-size:18px}#top span{font-size:13px;opacity:.7}
+#walls{position:fixed;left:0;right:0;bottom:0;padding:8px 16px calc(env(safe-area-inset-bottom) + 12px);display:flex;gap:8px;overflow-x:auto;scrollbar-width:none;touch-action:pan-x}
+#walls::-webkit-scrollbar{display:none}
+#walls button{flex:none;border:0;border-radius:18px;padding:8px 14px;font:600 14px system-ui,"PingFang TC";background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(11,74,107,.15)}
+#walls button.on{background:var(--ink);color:#fff}
+#card{position:fixed;left:16px;right:16px;bottom:calc(env(safe-area-inset-bottom) + 64px);background:var(--card);border-radius:14px;padding:12px 14px;box-shadow:0 2px 12px rgba(11,74,107,.18);display:none;align-items:center;gap:10px;font-size:16px}
+#card i{width:12px;height:12px;border-radius:6px;flex:none}#card small{margin-left:auto;font-size:15px;font-weight:600}
+#msg{position:fixed;inset:0;display:grid;place-items:center;font-size:14px;opacity:.7;pointer-events:none}
+</style>
+</head>
+<body>
+<div id="top"><b id="name"></b><span id="where"></span></div>
+<div id="card"><i></i><span></span><small></small></div>
+<div id="walls"></div>
+<div id="msg">載入中…</div>
+<script type="importmap">{"imports":{"three":"./three/build/three.module.js","three/addons/":"./three/examples/jsm/"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const id = new URLSearchParams(location.search).get('c');
+const base = `./${id}/`;
+const pack = await (await fetch(base + 'crag.json')).json();
+document.getElementById('name').textContent = pack.name;
+document.title = `${pack.name} 3D Topo`;
+
+const r = new THREE.WebGLRenderer({ antialias: true });
+r.setPixelRatio(Math.min(devicePixelRatio || 1, 2)); r.outputColorSpace = THREE.SRGBColorSpace;
+document.body.prepend(r.domElement);
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0xeef2f5);
+const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 2000);
+// 手勢仿岩點貓 3D 牆：單指移動、兩指縮放與轉角度；角度只能在正面附近轉
+const ctl = new OrbitControls(cam, r.domElement);
+ctl.screenSpacePanning = true; ctl.enableDamping = true;
+ctl.touches = { ONE: THREE.TOUCH.PAN, TWO: THREE.TOUCH.DOLLY_ROTATE };
+ctl.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.ROTATE };
+function fit() { const w = innerWidth, h = innerHeight; r.setSize(w, h); cam.aspect = w / h; cam.updateProjectionMatrix() }
+addEventListener('resize', fit); fit();
+
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+for (const a of pack.areas) for (const m of a.models) {
+  const g = await loader.loadAsync(base + m);
+  // 頂點顏色的 alpha 是留值：在三角形內沿 0.5 切出平順的邊（edges.py）
+  g.scene.traverse(x => { if (x.isMesh) x.material = new THREE.MeshBasicMaterial({ map: x.material.map, side: THREE.DoubleSide, vertexColors: !!x.geometry.attributes.color, alphaTest: 0.5 }) });
+  scene.add(g.scene);
+}
+
+const COL = { Red: 0xd7263d, Green: 0x2a9d4b, Yellow: 0xf2c200, Orange: 0xf28c28, Purple: 0x7b3fa0, White: 0xffffff, Blue: 0x2f6fd6, Black: 0x222222 };
+const tubes = [];
+function badge(text, w, fg, bg, scale) {
+  const c = Object.assign(document.createElement('canvas'), { width: w, height: 64 }), g = c.getContext('2d');
+  g.font = 'bold 36px system-ui'; g.fillStyle = bg; g.beginPath(); g.roundRect(4, 4, w - 8, 56, 28); g.fill();
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, 34);
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false })); s.scale.set(scale * w / 64, scale, 1); s.renderOrder = 3; return s;
+}
+for (const rt of pack.routes) {
+  const pts = rt.points.map(p => new THREE.Vector3(...p));
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts), Math.max(16, pts.length * 2), 0.05, 6, false),
+    new THREE.MeshBasicMaterial({ color: COL[rt.color] ?? 0xd7263d, depthTest: false, transparent: true, opacity: 0.9 }));
+  tube.renderOrder = 2; tube.userData.route = rt; scene.add(tube); tubes.push(tube);
+  const b = badge(rt.number, 128, '#fff', '#0B4A6B', 0.4); b.position.copy(pts.reduce((a, q) => a.y > q.y ? a : q)).add(new THREE.Vector3(0, 0.4, 0)); scene.add(b);
+  tube.userData.badge = b;
+}
+
+// 從岩壁下看一個範圍：沿站位的方向往後退到整個範圍塞得進畫面，角度限在正面附近
+function view(min, max, center, stand, label) {
+  const C = new THREE.Vector3(...center), out = new THREE.Vector3(...stand).sub(C); out.y = 0; out.normalize();
+  const span = Math.max(Math.hypot(max[0] - min[0], max[2] - min[2]), 1), h = max[1] - min[1];
+  const vf = THREE.MathUtils.degToRad(cam.fov), hf = 2 * Math.atan(Math.tan(vf / 2) * cam.aspect);
+  const d = Math.max(span * 0.55 / Math.tan(hf / 2), h * 0.6 / Math.tan(vf / 2), 4);
+  cam.position.copy(C).addScaledVector(out, d); cam.position.y = Math.min(stand[1] + 1.6, C.y);
+  ctl.target.copy(C); ctl.update();
+  const az = Math.atan2(out.x, out.z);
+  ctl.minAzimuthAngle = az - 0.6; ctl.maxAzimuthAngle = az + 0.6;
+  const po = ctl.getPolarAngle(); ctl.minPolarAngle = Math.max(0.3, po - 0.45); ctl.maxPolarAngle = Math.min(Math.PI - 0.3, po + 0.35);
+  ctl.minDistance = 1.5; ctl.maxDistance = d * 2.5;
+  document.getElementById('where').textContent = label;
+  hideCard();
+}
+const W = pack.walls;
+const box = new THREE.Box3().setFromObject(scene);   // 「全部」看整座岩場的模型，不只定出來的岩面
+const all = { name: '全部', min: box.min.toArray(), max: box.max.toArray() };
+all.center = all.min.map((v, i) => (v + all.max[i]) / 2);
+all.standAt = [0, 1, 2].map(i => W.reduce((s, w) => s + w.standAt[i] - w.center[i], 0) / W.length + all.center[i]);
+const bar = document.getElementById('walls');
+for (const w of [all, ...W]) {
+  const btn = Object.assign(document.createElement('button'), { textContent: w.name });
+  btn.onclick = () => { bar.querySelectorAll('.on').forEach(x => x.classList.remove('on')); btn.classList.add('on'); view(w.min, w.max, w.center, w.standAt, w === all ? '' : w.name) };
+  bar.append(btn);
+}
+
+const card = document.getElementById('card');
+function hideCard() { card.style.display = 'none'; tubes.forEach(t => { t.material.opacity = 0.9; t.userData.badge.material.opacity = 1 }) }
+function showRoute(t) {
+  const rt = t.userData.route;
+  tubes.forEach(x => { const on = x === t; x.material.opacity = on ? 1 : 0.25; x.userData.badge.material.opacity = on ? 1 : 0.3 });
+  card.querySelector('i').style.background = '#' + (COL[rt.color] ?? 0xd7263d).toString(16).padStart(6, '0');
+  card.querySelector('span').textContent = `${rt.number}. ${rt.name}`; card.querySelector('small').textContent = rt.grade;
+  card.style.display = 'flex';
+}
+// 點路線：只算沒拖動的點擊；點在路線附近（粗一點的判定）就選那條
+let down = null;
+r.domElement.addEventListener('pointerdown', e => down = e.isPrimary ? [e.clientX, e.clientY] : null);
+r.domElement.addEventListener('pointerup', e => {
+  if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 8) return;
+  const p = new THREE.Vector2(e.clientX / innerWidth * 2 - 1, -e.clientY / innerHeight * 2 + 1);
+  let best = null;
+  for (const t of tubes) {   // 管子很細，改用螢幕距離找最近的一條
+    for (const v of t.userData.route.points) {
+      const q = new THREE.Vector3(...v).project(cam), dd = Math.hypot((q.x - p.x) * innerWidth, (q.y - p.y) * innerHeight) / 2;
+      if (q.z < 1 && (!best || dd < best[0])) best = [dd, t];
+    }
+  }
+  if (best && best[0] < 28) showRoute(best[1]); else hideCard();
+});
+
+bar.firstChild.click();
+document.getElementById('msg').remove();
+(function loop() { requestAnimationFrame(loop); ctl.update(); r.render(scene, cam) })();
+</script>
+</body>
+</html>
