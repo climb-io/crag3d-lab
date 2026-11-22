@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>大砲岩模型比較</title>
+<!-- 大砲岩各種建模做法左右並排比較：兩邊共用同一個鏡頭（所有模型都在同一套座標），轉一邊另一邊一起動。
+     從 repo 根目錄開本機伺服器：/tools/crag3d/compare.html?a=<做法>&b=<做法>&wall=<岩壁> -->
+<style>
+:root{--bg:#dfe6ec;--ink:#0B4A6B;--card:#fff}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);font-family:system-ui,-apple-system,"PingFang TC",sans-serif;color:var(--ink)}
+#panes{position:fixed;inset:0;display:flex}
+.pane{position:relative;flex:1;min-width:0;border-left:2px solid #fff}
+.pane:first-child{border-left:0}
+.pane canvas{display:block;width:100%;height:100%}
+.pane select{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:2;font:600 14px system-ui,"PingFang TC";padding:6px 10px;border-radius:10px;border:0;background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(11,74,107,.2);max-width:calc(100% - 20px)}
+.pane .st{position:absolute;top:50px;left:50%;transform:translateX(-50%);font-size:13px;opacity:.75;pointer-events:none}
+#touch{position:fixed;inset:0;z-index:1}
+#bar{position:fixed;left:0;right:0;bottom:0;z-index:2;display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:8px 16px 14px}
+#bar button{border:0;border-radius:18px;padding:8px 14px;font:600 14px system-ui,"PingFang TC";background:var(--card);color:var(--ink);box-shadow:0 1px 4px rgba(11,74,107,.15);cursor:pointer}
+#bar button.on{background:var(--ink);color:#fff}
+#bar .sep{width:1px;background:#0B4A6B33;margin:4px 4px}
+@media (max-width:700px){#panes{flex-direction:column}.pane{border-left:0;border-top:2px solid #fff}.pane:first-child{border-top:0}}
+</style>
+</head>
+<body>
+<div id="panes"></div>
+<div id="touch"></div>
+<div id="bar"></div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","@sparkjsdev/spark":"https://cdn.jsdelivr.net/npm/@sparkjsdev/spark@2.4.0/dist/spark.module.js"}}</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { SparkRenderer, SplatMesh } from '@sparkjsdev/spark';
+
+const R = '../../runs/', S = R + 'dapaoyan-spz/', E = R + 'dapaoyan-3d/final/';
+// 各種做法：spz 是高斯潑濺、glb 是網格（同一格可以兩個疊在一起，例如網格岩壁＋潑濺背景）
+const METHODS = [
+  ['hybrid', '網格岩壁＋潑濺背景（紅點貓現用）', [S + 'hybrid/rock.glb', S + 'hybrid/bg2.spz']],
+  ['rock', '網格岩壁 v11（790 張）', [S + 'hybrid/rock.glb']],
+  ['crop', '潑濺・裁到梁大隆～雙十', [S + 'crop.spz']],
+  ['merged', '潑濺・全區換上梁大隆', [S + 'merged.spz']],
+  ['full', '潑濺・Atlas 全區 v3（24 張＋AI 圖）', [S + 'dapaoyan_full_raw_v3.spz']],
+  ['mobile', '潑濺・Atlas 全區手機版', [S + 'dapaoyan_full_raw_mobile.spz']],
+  ['atlas64', '潑濺・自選 64 張重訓', [S + 'atlas64/out/refinedSplats_2000000.spz']],
+  ['bg2', '潑濺背景（挖掉岩壁）', [S + 'hybrid/bg2.spz']],
+  // 自建網格大多只建了東邊幾面：選單上寫涵蓋到哪裡，切到沒建的岩壁是空的
+  ...[['e13c', '梁大隆、下降面'], ['e13b', '梁大隆、下降面'], ['e13r', '梁大隆、下降面'], ['e12', '梁大隆、下降面'], ['e11', '梁大隆、下降面'], ['e9', '只有梁大隆'], ['e7', '梁大隆、下降面'], ['e6c', '梁大隆、下降面'], ['e3', '梁大隆～新手牆']]
+    .map(([k, area]) => [k, `自建網格 ${k.toUpperCase()}（${area}）`, [E + `model-${k}.glb`]]),
+  ['e0', '自建網格 第一版（全區）', [E + 'model.glb']],
+  ['w5', '自建網格 砲管 W5（11-06 照片）', [R + 'dapaoyan-3d/exp/W5/model.glb']],
+  ['p1', '自建網格 砲管 P1（加 11-21 補拍）', [R + 'dapaoyan-3d/exp/P1/model.glb']],
+];
+const byKey = Object.fromEntries(METHODS.map((m) => [m[0], m]));
+const q = new URLSearchParams(location.search);
+
+// 岩壁：東區四面用最新的（有朝向），其他區用舊的分區
+const [cur, old] = await Promise.all([fetch(S + 'crag-sight.json').then((r) => r.json()), fetch(E + 'crag.json').then((r) => r.json())]);
+const walls = [...cur.walls, ...old.walls.filter((w) => !cur.walls.some((c) => c.name === w.name))];
+const routeGroup = () => {
+  const g = new THREE.Group();
+  for (const r of cur.routes) if (r.points?.length > 1) {
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(r.points.map((p) => new THREE.Vector3(...p))), new THREE.LineBasicMaterial({ color: 0xe53935, depthTest: false, transparent: true }));
+    l.renderOrder = 10; g.add(l);
+  }
+  return g;
+};
+
+const cam = new THREE.PerspectiveCamera(50, 1, 0.05, 2000);
+const ctl = new OrbitControls(cam, document.getElementById('touch'));
+ctl.enableDamping = true; ctl.screenSpacePanning = true;
+
+const panes = ['a', 'b'].map((side, i) => {
+  const box = document.createElement('div'); box.className = 'pane';
+  const sel = document.createElement('select');
+  for (const [k, name] of METHODS) sel.append(new Option(name, k));
+  sel.value = byKey[q.get(side)] ? q.get(side) : ['hybrid', 'crop'][i];
+  const st = document.createElement('div'); st.className = 'st';
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  const scene = new THREE.Scene(); scene.background = new THREE.Color(0xdfe6ec);
+  scene.add(new SparkRenderer({ renderer }));
+  const routes = routeGroup(); scene.add(routes);
+  box.append(renderer.domElement, sel, st);
+  document.getElementById('panes').append(box);
+  const p = { side, box, sel, st, renderer, scene, routes, objs: [], token: 0 };
+  sel.onchange = () => { load(p); saveUrl(); };
+  return p;
+});
+
+async function load(p) {
+  const token = ++p.token;
+  for (const o of p.objs) { p.scene.remove(o); o.dispose?.(); o.traverse?.((x) => { x.geometry?.dispose(); x.material?.map?.dispose(); x.material?.dispose?.(); }); }
+  p.objs = [];
+  const [, name, urls] = byKey[p.sel.value];
+  p.st.textContent = '載入中…';
+  try {
+    for (const u of urls) {
+      let o;
+      if (u.endsWith('.spz')) { o = new SplatMesh({ url: u }); await o.initialized; }
+      else {
+        const gltf = await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).loadAsync(u);
+        gltf.scene.traverse((x) => { if (x.isMesh) x.material = new THREE.MeshBasicMaterial({ map: x.material.map, side: THREE.DoubleSide, vertexColors: !!x.geometry.attributes.color, alphaTest: 0.5 }); });
+        o = gltf.scene;
+      }
+      if (token !== p.token) { o.dispose?.(); return; }
+      p.scene.add(o); p.objs.push(o);
+    }
+    p.st.textContent = '';
+  } catch (e) { if (token === p.token) p.st.textContent = `讀不到：${e.message || e}`; }
+}
+
+// 飛到一面岩壁：正對岩面（有 facing 用 facing，沒有用站位方向），整面放進畫面
+let fly = null;
+function goWall(w, instant = false) {
+  const c = new THREE.Vector3(...w.min).add(new THREE.Vector3(...w.max)).multiplyScalar(0.5);
+  const f = w.facing ? new THREE.Vector3(...w.facing) : new THREE.Vector3(...w.standAt).sub(new THREE.Vector3(...w.center)).setY(0);
+  f.setY(0).normalize();
+  const size = new THREE.Vector3(...w.max).sub(new THREE.Vector3(...w.min));
+  const h = Math.max(size.y, Math.hypot(size.x, size.z) / cam.aspect) * 1.25;
+  const d = h / 2 / Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));
+  const pos = c.clone().addScaledVector(f, d); pos.y = c.y + d * 0.12;
+  if (instant) { cam.position.copy(pos); ctl.target.copy(c); ctl.update(); return; }
+  fly = { t0: performance.now(), p0: cam.position.clone(), t0g: ctl.target.clone(), p1: pos, t1: c };
+  for (const b of wallBtns) b.classList.toggle('on', b.textContent === w.name);
+  saveUrl(w.name);
+}
+
+const bar = document.getElementById('bar');
+const wallBtns = walls.map((w) => { const b = document.createElement('button'); b.textContent = w.name; b.onclick = () => goWall(w); bar.append(b); return b; });
+const sep = document.createElement('div'); sep.className = 'sep'; bar.append(sep);
+const rb = document.createElement('button'); rb.textContent = '路線'; rb.classList.add('on'); bar.append(rb);
+rb.onclick = () => { rb.classList.toggle('on'); for (const p of panes) p.routes.visible = rb.classList.contains('on'); };
+const sw = document.createElement('button'); sw.textContent = '左右對調'; bar.append(sw);
+sw.onclick = () => { const [a, b] = panes; [a.sel.value, b.sel.value] = [b.sel.value, a.sel.value]; load(a); load(b); saveUrl(); };
+
+let wallName = q.get('wall');
+function saveUrl(w) {
+  if (w) wallName = w;
+  const u = new URLSearchParams({ a: panes[0].sel.value, b: panes[1].sel.value, ...(wallName ? { wall: wallName } : {}) });
+  history.replaceState(null, '', '?' + u);
+}
+
+function resize() {
+  const r = panes[0].box.getBoundingClientRect();
+  for (const p of panes) p.renderer.setSize(r.width, r.height, false);
+  cam.aspect = r.width / r.height; cam.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+const first = walls.find((w) => w.name === wallName) ?? walls[0];
+goWall(first, true); wallBtns.find((b) => b.textContent === first.name)?.classList.add('on'); saveUrl(first.name);
+panes.forEach(load);
+
+const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
+panes[0].renderer.setAnimationLoop(() => {
+  if (fly) {
+    const t = Math.min(1, (performance.now() - fly.t0) / 1200), k = ease(t);
+    cam.position.lerpVectors(fly.p0, fly.p1, k); ctl.target.lerpVectors(fly.t0g, fly.t1, k);
+    if (t === 1) fly = null;
+  }
+  ctl.update();
+  for (const p of panes) p.renderer.render(p.scene, cam);
+});
+window.cmp = { cam, ctl, panes, walls, THREE };
+</script>
+</body>
+</html>

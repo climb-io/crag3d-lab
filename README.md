@@ -31,6 +31,10 @@ python3 tools/download.py                                  # 全部（約 4.6 GB
 
 已發佈的岩場：<https://climbio.app/p/rw9oa7t1taemt9zj>（用紅點貓打開；電腦上用方向鍵或沿岩壁拖曳）。
 
+## 模型更新後重做
+
+新的或擴建的模型進來之後，照 [RUNBOOK.md](RUNBOOK.md) 重做 3D 路線書：產品規則、步驟、驗收數字、發佈。任何 AI 代理都能照著做。
+
 ## 自己跑
 
 Python 3，`pip install -r requirements.txt`；`snap.html` 要用無頭瀏覽器（Playwright）加 `snap_server.py`。照 `runs/dapaoyan-spz/pack-show.sh` 一段一段做，每支工具檔案開頭的註解寫了它吃什麼、吐什麼。腳本裡的路徑是我們用的那組，`PY`、`LEGACY` 可以用環境變數換。整套還沒有在原本那台電腦以外的地方完整跑過，預期要自己修路徑。
