@@ -27,7 +27,7 @@
   - 計算用 `crop.spz`，展示用 `crop-show.spz`（24.5 MB）。
   - 模型是全區潑濺 `dapaoyan_full_raw_v3.spz`；梁大隆段換成 `liangdalong_splats.spz`（`spz_merge.py`：x ≥ 55、y ≤ 10.8，對位參數 `atlas_alignment.json`）。
 - **十字、砲管（拆三區）、飛鳥、雙十**：路線位置已有（`crag-sight.json`），但當時模型品質不夠，沒上線。
-- **2026-11-21 補拍 191 張**（iPhone 12，07:55–08:13）（尚未公開）。
+- **2026-11-21 補拍 191 張**（iPhone 12，07:55–08:13），在 Hugging Face 的 `photos/originals-20261121/`。
   - 挑照片用 `tools/crag3d/select_cover.py`：照岩面涵蓋度挑。
   - 砲管試跑：對齊殘差 3.7 cm，挑 170 張，各面沒照片看到的點 ≤ 1.4%。
 - **本機中間檔遺失**：2026-11-21 作者機器上的中間檔遺失，中間檔改從 Hugging Face `climbio/crag3d-lab` 下載。

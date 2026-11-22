@@ -9,6 +9,7 @@ Large files live in the Hugging Face dataset [climbio/crag3d-lab](https://huggin
 | Folder | Contents | Size |
 |---|---|---|
 | `photos/originals/` | 790 original photos (iPhone originals with EXIF and capture location) | 3.4 GB |
+| `photos/originals-20261121/` | 191 photos taken on 2026-11-21 (iPhone originals with EXIF and capture location; for extending the model) | 0.8 GB |
 | `guidebook-2d/` | The 2D guidebook as Climbio format v2: `index.json` is the entry, with 336 photo views, the set and the crag map | 451 MB |
 | `legacy-2d/` | 85 route photos from the old app (red lines drawn on photos; people blurred in 7), `routes.json`, the area map | 20 MB |
 | `models/source/` | Gaussian-splat models made with World Labs Atlas: the whole crag (several versions), one wall, a chimney patch | 233 MB |

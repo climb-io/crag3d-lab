@@ -9,6 +9,7 @@ English: [DATA.en.md](DATA.en.md)
 | 資料夾 | 內容 | 大小 |
 |---|---|---|
 | `photos/originals/` | 原始照片 790 張（iPhone 原檔，含 EXIF 與拍攝位置） | 3.4 GB |
+| `photos/originals-20261121/` | 2026-11-21 補拍 191 張（iPhone 原檔，含 EXIF 與拍攝位置；給模型擴建用，照岩面涵蓋度挑照片） | 0.8 GB |
 | `guidebook-2d/` | 2D 路線書：Climbio 格式 v2，`index.json` 是入口，336 張照片的畫面、組合、岩場地圖 | 451 MB |
 | `legacy-2d/` | 舊 App 的 2D 路線圖 85 張（照片上畫了紅線；7 張拍到人的部分已模糊）、路線資料 `routes.json`、區域圖 | 20 MB |
 | `models/source/` | 用 World Labs Atlas 做的高斯潑濺模型：全區（多個版本）、梁大隆、煙囪補丁 | 233 MB |
